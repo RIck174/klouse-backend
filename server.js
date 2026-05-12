@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 5000;
 
 app.use(
   cors({
-    origin: true,
+    origin: ["https://klouse-frontend.vercel.app", "http://localhost:5173"],
     credentials: true,
   }),
 );
