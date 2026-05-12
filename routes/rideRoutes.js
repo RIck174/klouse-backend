@@ -7,7 +7,7 @@ const Protect = require("../middleware/authMiddleware");
 //ride routes
 router.post("/request", Protect, async (req, res) => {
   try {
-    const { destination, destinationName } = req.body;
+    const { destination, destinationName, vehicleType, notes } = req.body;
     const user = await User.findById(req.user.id);
 
     if (!user.location) {
@@ -66,47 +66,13 @@ router.post("/request", Protect, async (req, res) => {
       },
       fare,
       destinationName: destinationName || "",
+      vehicleType: vehicleType || "Car",
+      notes: notes || "",
     });
 
-    const nearbyDriver = await User.find({
-      role: "driver",
-      isOnline: true,
-      available: true,
-    })
-      .where("location")
-      .near({
-        center: {
-          type: "Point",
-          coordinates: user.location.coordinates,
-        },
-        maxDistance: 3000,
-      })
-      .limit(15);
-
-    if (nearbyDriver.length === 0) {
-      return res.json({ message: "No drivers found yet", ride });
-    }
-
-    ride.driversNotified = nearbyDriver.map((d) => d.id);
-    await ride.save();
-
-    // Get socket system
     const io = req.app.get("io");
     const onlineUsers = req.app.get("onlineUsers");
-
-    // Notify only nearby AND online drivers
-    nearbyDriver.forEach((driver) => {
-      const driverSocketId = onlineUsers[driver._id.toString()];
-
-      if (driverSocketId) {
-        io.to(driverSocketId).emit("newRideRequest", {
-          rideId: ride._id,
-          pickup: ride.pickup,
-          destination: ride.destination,
-        });
-      }
-    });
-
+    notifyDriversInBatches(ride, io, onlineUsers);
     res.json({ message: "Ride requested successfully", ride });
   } catch (err) {
     res
@@ -354,5 +320,115 @@ router.get("/:rideId", Protect, async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
+// Decline ride
+router.post("/decline/:rideId", Protect, async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.rideId);
 
+    if (!ride) {
+      return res.status(404).json({ message: "Ride not found" });
+    }
+
+    // Add driver to declined list if not already there
+    if (!ride.driversDeclined.includes(req.user.id)) {
+      ride.driversDeclined.push(req.user.id);
+      await ride.save();
+    }
+
+    res.json({ message: "Ride declined" });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+async function notifyDriversInBatches(ride, io, onlineUsers) {
+  const BATCH_RANGES = [3000, 6000, 10000, 15000, 20000];
+  const BATCH_WAIT = 30000; // 30 seconds
+
+  const cycle = async () => {
+    // Stop if ride no longer searching
+    const currentRide = await Ride.findById(ride._id);
+    if (!currentRide || currentRide.status !== "Searching") return;
+
+    // Get all drivers within 20km, correct vehicle type, not declined
+    const allDrivers = await User.find({
+      role: "driver",
+      isOnline: true,
+      available: true,
+      vehicleType: currentRide.vehicleType,
+      _id: { $nin: currentRide.driversDeclined },
+    })
+      .where("location")
+      .near({
+        center: {
+          type: "Point",
+          coordinates: currentRide.pickup.coordinates,
+        },
+        maxDistance: 20000,
+      });
+
+    if (allDrivers.length === 0) {
+      // No drivers at all, retry after 30s
+      setTimeout(cycle, BATCH_WAIT);
+      return;
+    }
+
+    // Notify in batches by distance
+    let batchIndex = 0;
+
+    const notifyNextBatch = async () => {
+      const fresh = await Ride.findById(ride._id);
+      if (!fresh || fresh.status !== "Searching") return;
+
+      if (batchIndex >= BATCH_RANGES.length) {
+        // All batches done, restart cycle
+        setTimeout(cycle, BATCH_WAIT);
+        return;
+      }
+
+      const maxDist = BATCH_RANGES[batchIndex];
+      const minDist = batchIndex === 0 ? 0 : BATCH_RANGES[batchIndex - 1];
+
+      const batch = allDrivers.filter((d) => {
+        const [dLng, dLat] = d.location.coordinates;
+        const [pLng, pLat] = fresh.pickup.coordinates;
+        const dist = getDistanceMeters(dLat, dLng, pLat, pLng);
+        return dist >= minDist && dist < maxDist;
+      });
+
+      batch.forEach((driver) => {
+        const socketId = onlineUsers[driver._id.toString()];
+        if (socketId) {
+          io.to(socketId).emit("newRideRequest", {
+            rideId: fresh._id,
+            pickup: fresh.pickup,
+            destination: fresh.destination,
+            vehicleType: fresh.vehicleType,
+            notes: fresh.notes,
+          });
+        }
+      });
+
+      batchIndex++;
+      setTimeout(notifyNextBatch, BATCH_WAIT);
+    };
+
+    notifyNextBatch();
+  };
+
+  cycle();
+}
+
+function getDistanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 module.exports = router;

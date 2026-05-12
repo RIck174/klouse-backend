@@ -6,7 +6,7 @@ const onlineUsers = {};
 function initSocket(server) {
   const io = new Server(server, {
     cors: {
-      origin: true,
+      origin: ["https://klouse-frontend.vercel.app", "http://localhost:5173"],
       methods: ["GET", "POST"],
       credentials: true,
     },
