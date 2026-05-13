@@ -4,6 +4,7 @@ const Ride = require("../Models/Ride");
 const router = express.Router();
 const Protect = require("../middleware/authMiddleware");
 const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 //location route
 router.put("/location", Protect, async (req, res) => {
