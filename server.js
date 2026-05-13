@@ -5,6 +5,7 @@ const authRoutes = require("./routes/authRoutes");
 const rideRoutes = require("./routes/rideRoutes");
 const userRoutes = require("./routes/userRoutes");
 const Settings = require("./Models/Settings");
+const placeRoutes = require("./routes/placeRoutes");
 const http = require("http");
 const initSocket = require("./socket");
 require("dotenv").config();
@@ -23,6 +24,8 @@ app.use(express.json());
 app.use("/auth", authRoutes);
 app.use("/ride", rideRoutes);
 app.use("/user", userRoutes);
+app.use("/places", placeRoutes);
+
 app.get("/", (req, res) => {
   res.send("Backend is running");
 });
