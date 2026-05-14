@@ -403,6 +403,7 @@ async function notifyDriversInBatches(ride, io, onlineUsers) {
             rideId: fresh._id,
             pickup: fresh.pickup,
             destination: fresh.destination,
+            destinationName: fresh.destinationName,
             vehicleType: fresh.vehicleType,
             notes: fresh.notes,
           });
