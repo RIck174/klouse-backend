@@ -138,17 +138,14 @@ router.post("/accept/:rideId", Protect, async (req, res) => {
   }
 });
 
-//active ride
+//active rides
 router.get("/active", Protect, async (req, res) => {
   try {
     const activeRide = await Ride.findOne({
       userId: req.user.id,
-      status: { $in: ["Searching", "Accepted"] },
+      status: { $in: ["Searching", "Accepted", "Arrived", "InProgress"] },
     });
-
-    if (!activeRide) {
-      return res.status(404).json({ message: "No active ride" });
-    }
+    if (!activeRide) return res.status(404).json({ message: "No active ride" });
     res.json(activeRide);
   } catch (err) {
     res.status(500).json({ message: "Server error" });
@@ -336,6 +333,53 @@ router.post("/decline/:rideId", Protect, async (req, res) => {
     }
 
     res.json({ message: "Ride declined" });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+// Driver arrived at pickup
+router.post("/arrived/:rideId", Protect, async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.rideId);
+    if (!ride) return res.status(404).json({ message: "Ride not found" });
+    if (ride.acceptedBy.toString() !== req.user.id)
+      return res.status(403).json({ message: "Not authorized" });
+
+    ride.status = "Arrived";
+    await ride.save();
+
+    const io = req.app.get("io");
+    const onlineUsers = req.app.get("onlineUsers");
+    const riderSocketId = onlineUsers[ride.userId.toString()];
+    if (riderSocketId) {
+      io.to(riderSocketId).emit("driverArrived", { rideId: ride._id });
+    }
+
+    res.json({ message: "Marked as arrived", ride });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// Start ride (rider picked up)
+router.post("/start/:rideId", Protect, async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.rideId);
+    if (!ride) return res.status(404).json({ message: "Ride not found" });
+    if (ride.acceptedBy.toString() !== req.user.id)
+      return res.status(403).json({ message: "Not authorized" });
+
+    ride.status = "InProgress";
+    await ride.save();
+
+    const io = req.app.get("io");
+    const onlineUsers = req.app.get("onlineUsers");
+    const riderSocketId = onlineUsers[ride.userId.toString()];
+    if (riderSocketId) {
+      io.to(riderSocketId).emit("rideStarted", { rideId: ride._id });
+    }
+
+    res.json({ message: "Ride started", ride });
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
   }
