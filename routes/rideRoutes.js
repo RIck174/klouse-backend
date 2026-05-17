@@ -308,15 +308,6 @@ router.post("/complete/:rideId", Protect, async (req, res) => {
   }
 });
 
-router.get("/:rideId", Protect, async (req, res) => {
-  try {
-    const ride = await Ride.findById(req.params.rideId);
-    if (!ride) return res.status(404).json({ message: "Ride not found" });
-    res.json(ride);
-  } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-});
 // Decline ride
 router.post("/decline/:rideId", Protect, async (req, res) => {
   try {
@@ -380,6 +371,53 @@ router.post("/start/:rideId", Protect, async (req, res) => {
     }
 
     res.json({ message: "Ride started", ride });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+router.get("/earnings", Protect, async (req, res) => {
+  try {
+    const rides = await Ride.find({
+      acceptedBy: req.user.id,
+      status: "Completed",
+    }).sort({ createdAt: -1 });
+
+    const now = new Date();
+    const startOfDay = new Date(now.setHours(0, 0, 0, 0));
+    const startOfWeek = new Date();
+    startOfWeek.setDate(startOfWeek.getDate() - 7);
+
+    const todayEarnings = rides
+      .filter((r) => new Date(r.createdAt) >= startOfDay)
+      .reduce((sum, r) => sum + (r.fare || 0), 0);
+
+    const weekEarnings = rides
+      .filter((r) => new Date(r.createdAt) >= startOfWeek)
+      .reduce((sum, r) => sum + (r.fare || 0), 0);
+
+    const totalEarnings = rides.reduce((sum, r) => sum + (r.fare || 0), 0);
+
+    const avgFare = rides.length > 0 ? totalEarnings / rides.length : 0;
+
+    res.json({
+      rides,
+      todayEarnings,
+      weekEarnings,
+      totalEarnings,
+      avgFare,
+      totalRides: rides.length,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+router.get("/:rideId", Protect, async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.rideId);
+    if (!ride) return res.status(404).json({ message: "Ride not found" });
+    res.json(ride);
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
   }
